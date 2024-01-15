@@ -7,6 +7,11 @@ if int(os.environ.get("LOAD_LADE", 0)):
     lade.augment_all()
     lade.config_lade(LEVEL=7, WINDOW_SIZE=20, GUESS_SET_SIZE=20, DEBUG=1)
 
+if int(os.environ.get("LOAD_TRIEDE", 0)):
+    import triede
+    triede.augment_all()
+    triede.config_lade(LEVEL=7, WINDOW_SIZE=20, GUESS_SET_SIZE=20, DEBUG=1)
+
 assert torch.cuda.is_available()
 
 torch_device = "cuda"
