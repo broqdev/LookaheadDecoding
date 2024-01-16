@@ -7,19 +7,15 @@ from lade.models import llama
 from transformers import AutoConfig, AutoTokenizer, AutoModelForCausalLM
 import torch 
 
-def config_lade(WINDOW_SIZE=None, LEVEL=None, DEBUG=None, GUESS_SET_SIZE=None, ALWAYS_FWD_ONE=None, SPLIT_FLAG=None, DIST_WORKERS=None, backend = 'nccl', USE_FLASH=None):
-    if WINDOW_SIZE is not None:
-        CONFIG_MAP["WINDOW_SIZE"] = WINDOW_SIZE
-    if LEVEL is not None:
-        CONFIG_MAP["LEVEL"] = LEVEL
+def config_triede(PREFIX_LEN=None, GUESS_SIZE=None, DEBUG=None, GUESS_SET_SIZE=None, DIST_WORKERS=None, backend = 'nccl', USE_FLASH=None):
+    if PREFIX_LEN is not None:
+        CONFIG_MAP["PREFIX_LEN"] = PREFIX_LEN
+    if GUESS_SIZE is not None:
+        CONFIG_MAP["GUESS_SIZE"] = GUESS_SIZE
     if GUESS_SET_SIZE is not None:
         CONFIG_MAP["GUESS_SET_SIZE"] = GUESS_SET_SIZE
-    if ALWAYS_FWD_ONE is not None:
-        CONFIG_MAP["ALWAYS_FWD_ONE"] = ALWAYS_FWD_ONE
     if DEBUG is not None:
         CONFIG_MAP["DEBUG"] = DEBUG
-    if SPLIT_FLAG is not None:
-        CONFIG_MAP["SPLIT_FLAG"] = SPLIT_FLAG
     if DIST_WORKERS is not None and DIST_WORKERS > 1:
         CONFIG_MAP["DIST_WORKERS"] = DIST_WORKERS
         CONFIG_MAP["LOCAL_RANK"] = int(os.environ["LOCAL_RANK"])

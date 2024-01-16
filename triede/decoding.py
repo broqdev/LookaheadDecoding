@@ -196,18 +196,15 @@ def jacobi_greedy_search_multilevel(
 
     this_peer_finished = False  # used by synced_gpus only
     ############### configurations 
-    WINDOW_SIZE = CONFIG_MAP.get("WINDOW_SIZE", 60)
     GUESS_SET_SIZE = CONFIG_MAP.get("GUESS_SET_SIZE", 60)
-    ALWAYS_FWD_ONE = CONFIG_MAP.get("ALWAYS_FWD_ONE", 1)
-    LEVEL = CONFIG_MAP.get("LEVEL", 8)
+    LEVEL = None
+    WINDOW_SIZE = 0
+    GUESS_SIZE = CONFIG_MAP.get("GUESS_SIZE", 7)
     DEBUG = CONFIG_MAP.get("DEBUG", 0)
-    DIST_WORKERS = CONFIG_MAP.get("DIST_WORKERS", 1)
     LOCAL_RANK = CONFIG_MAP.get("LOCAL_RANK", 0)
-    USE_FLASH = CONFIG_MAP.get("USE_FLASH", 0) #not use flash by default
     USE_AWQ = False #not support AWQ
     #IN FLASH ATTENTION WE REORDERED LOOKAHEAD WINDOW 
 
-    GUESS_SIZE = LEVEL - 1
     NOT_SEQ = 0
     CONTINUE_ALL = 0
     TEMP_FOR_GUESS = 0.0
@@ -239,11 +236,9 @@ def jacobi_greedy_search_multilevel(
 
     set_token = copy_from
 
-    past_tokens = [[set_token() for _ in range(WINDOW_SIZE + LEVEL - 3)]] + [None for _ in range(LEVEL - 2)]
-    fill_level = 0
+    past_tokens = [None, None]
+    fill_level = -1
     guess_tokens = None
-    token_map = {}
-    gpu_times = 0
     steps = 0
     reps = 0
 
@@ -252,16 +247,11 @@ def jacobi_greedy_search_multilevel(
                                    spaces_between_special_tokens=False, clean_up_tokenization_spaces=True,)
         prev = len(init)
     
-    ### init start
-    TRIE_PREFIX_LEN = CONFIG_MAP.get("TRIE_PREFIX_LEN", 1)
+    TRIE_PREFIX_LEN = CONFIG_MAP.get("PREFIX_LEN", 1)
     # TRIE_GUESS_SIZE = CONFIG_MAP.get("TRIE_GUESS_SIZE", 6)
-    TRIE_GUESS_SIZE = GUESS_SIZE
-    TRIE_DEBUG = CONFIG_MAP.get("TRIE_DEBUG", False)
 
     trie_record_buf = input_ids[0].tolist()
     trie = Trie(None)
-    # _init_trie(trie, input_ids[0].tolist(), TRIE_PREFIX_LEN, TRIE_GUESS_SIZE)
-    ### init end
 
     #print("first input: ", init, flush=True)
     while True:
@@ -278,16 +268,16 @@ def jacobi_greedy_search_multilevel(
         # prepare model inputs
         model_inputs = self.prepare_inputs_for_generation(input_ids, **model_kwargs)
 
-        _record_trie(trie, trie_record_buf, TRIE_PREFIX_LEN, TRIE_GUESS_SIZE)
+        _record_trie(trie, trie_record_buf, TRIE_PREFIX_LEN, GUESS_SIZE)
 
         prefix = trie_record_buf[-TRIE_PREFIX_LEN:]
-        guess_tokens_ = trie.gen_by_prefix(prefix, TRIE_GUESS_SIZE, GUESS_SET_SIZE)
+        guess_tokens_ = trie.gen_by_prefix(prefix, GUESS_SIZE, GUESS_SET_SIZE)
 
-        if TRIE_DEBUG:
-            prefix_str = self.tokenizer.decode(prefix, skip_special_tokens=True, paces_between_special_tokens=False, clean_up_tokenization_spaces=True,)
-            for i, tok in enumerate(guess_tokens_):
-                tok_str = self.tokenizer.decode(tok, skip_special_tokens=True, paces_between_special_tokens=False, clean_up_tokenization_spaces=True,)
-                print(f"guess {i}: {prefix_str} >>>> {tok_str}")
+        # if DEBUG:
+        #     prefix_str = self.tokenizer.decode(prefix, skip_special_tokens=True, paces_between_special_tokens=False, clean_up_tokenization_spaces=True,)
+        #     for i, tok in enumerate(guess_tokens_):
+        #         tok_str = self.tokenizer.decode(tok, skip_special_tokens=True, paces_between_special_tokens=False, clean_up_tokenization_spaces=True,)
+        #         print(f"guess {i}: {prefix_str} >>>> {tok_str}")
 
         guess_tokens = []
         for tok in guess_tokens_:
@@ -323,10 +313,7 @@ def jacobi_greedy_search_multilevel(
         if synced_gpus and this_peer_finished:
             continue  # don't waste resources running the code we don't need
         
-        if past_tokens[LEVEL - 2] is None: #prefill  
-            next_token_logits = outputs.out_logits
-        else:
-            next_token_logits = outputs.out_logits #outputs.logits[:, -1, :]
+        next_token_logits = outputs.out_logits
 
         # pre-process distribution
         #next_tokens_scores = logits_processor(input_ids, next_token_logits)
@@ -345,22 +332,6 @@ def jacobi_greedy_search_multilevel(
         hits = [first_guess] + [0] * (GUESS_SIZE - 1)
 
 
-        ### new_results = []
-        ### #print("fill level: ", fill_level)
-        ### if past_tokens[1] is None:
-        ###     assert fill_level == 0
-        ###     past_tokens[0] = past_tokens[0][1:] 
-        ###     past_tokens[1] = torch.argmax(outputs.inp_logits, dim=-1)[0].tolist()
-
-        ###     fill_level += 1
-        ### elif past_tokens[LEVEL - 2] is None:
-        ###     for level in range(fill_level + 1):
-        ###         past_tokens[level] = past_tokens[level][1:] 
-
-        ###     past_tokens[fill_level + 1] = torch.argmax(outputs.inp_logits, dim=-1)[0].tolist()[1:]
-        ###     
-        ###     fill_level += 1
-        ### else:
         if True:
             if guess_tokens is not None:
                 guess_results = torch.argmax(outputs.guess_logits, dim=-1)[0].tolist()
@@ -378,68 +349,7 @@ def jacobi_greedy_search_multilevel(
                         hit_point = eg 
                         hits[:max_hit + 1] = correct[:max_hit + 1]
 
-            ### new_results = torch.argmax(outputs.inp_logits, dim=-1)[0].tolist()
-            
-            ### assert len(past_tokens[LEVEL - 2]) == WINDOW_SIZE and len(new_results) == WINDOW_SIZE
-
-            ### if GUESS_SET_SIZE != -1:
-            ###     if lst_token not in token_map:
-            ###         token_map[lst_token] = []
-            ###     tup = tuple(past_tokens[ll][0] for ll in range(1, LEVEL - 1)) + (new_results[0],)
-            ###     if tup in token_map[lst_token]:
-            ###         token_map[lst_token].remove(tup)
-            ###         token_map[lst_token].append(tup)
-            ###     elif len(token_map[lst_token]) < GUESS_SET_SIZE:
-            ###         token_map[lst_token].append(tup) 
-            ###     else:
-            ###         assert len(token_map[lst_token]) == GUESS_SET_SIZE
-            ###         token_map[lst_token] = token_map[lst_token][1:] + [tup]
-
-            ###     for i in range(1, WINDOW_SIZE):
-            ###         if past_tokens[0][i - 1] not in token_map:
-            ###             token_map[past_tokens[0][i - 1]] = []
-            ###         tup = tuple(past_tokens[ll][i] for ll in range(1, LEVEL - 1)) + (new_results[i],)
-
-            ###         if tup in token_map[past_tokens[0][i - 1]]:
-            ###             token_map[past_tokens[0][i - 1]].remove(tup)
-            ###             token_map[past_tokens[0][i - 1]].append(tup)
-            ###         elif len(token_map[past_tokens[0][i - 1]]) < GUESS_SET_SIZE:
-            ###             token_map[past_tokens[0][i - 1]].append(tup) 
-            ###         else:
-            ###             assert len(token_map[past_tokens[0][i - 1]]) == GUESS_SET_SIZE
-            ###             token_map[past_tokens[0][i - 1]] = token_map[past_tokens[0][i - 1]][1:] + [tup]
-
-            ### else:
-            ###     if lst_token not in token_map:
-            ###         token_map[lst_token] = set()
-            ###     tup = tuple(past_tokens[ll][0] for ll in range(1, LEVEL - 1)) + (new_results[0],)
-            ###     token_map[lst_token].add(tup) #add((past_tokens[1][0], new_results[0]))
-
-            ###     for i in range(1, WINDOW_SIZE):
-            ###         if past_tokens[0][i - 1] not in token_map:
-            ###             token_map[past_tokens[0][i - 1]] = set()
-            ###         tup = tuple(past_tokens[ll][i] for ll in range(1, LEVEL - 1)) + (new_results[i],)
-            ###         token_map[past_tokens[0][i - 1]].add(tup) #((past_tokens[1][i], new_results[i]))
-
-            ### if ALWAYS_FWD_ONE:
-            ###     past_tokens[0] = past_tokens[1][1:]
-            ###     for level in range(1, LEVEL - 2):
-            ###         past_tokens[level] = past_tokens[level + 1][:]
-
-            ###     past_tokens[LEVEL - 2] = new_results             
-            ### else:
-            ###     past_tokens[0] = past_tokens[1][1 + max_hit:]
-            ###     for level in range(1, LEVEL - 2):
-            ###         past_tokens[level] = past_tokens[level + 1][max_hit:]
-
-            ###     past_tokens[LEVEL - 2] = new_results[max_hit:]
-
-
         if max_hit > 0:
-            ### if not ALWAYS_FWD_ONE:
-            ###     for level in range(LEVEL - 1):
-            ###         past_tokens[level] = past_tokens[level] + [set_token() for _ in range(max_hit)]
-
             attention_mask = model_kwargs["attention_mask"]
             model_kwargs["attention_mask"] = torch.cat((attention_mask, torch.ones(1, max_hit, device=attention_mask.device, dtype=attention_mask.dtype)), dim=1)
         

@@ -17,17 +17,10 @@ def j_make_causal_mask_multilevel(
         mask.masked_fill_(mask_cond < (mask_cond + 1).view(mask.size(-1), 1), 0)
         return mask[None, None, :, :].expand(bsz, 1, tgt_len, tgt_len + past_key_values_length)
 
-    ### if is_prefill:
-    ###     mask_cond = torch.arange(mask.size(-1), device=device)
-    ###     mask.masked_fill_(mask_cond < (mask_cond + 1).view(mask.size(-1), 1), 0)
-    ###     mask = mask.to(dtype)
-    ###     assert past_key_values_length == 0
-    ###     assert guess is None
-    ###     return mask[None, None, :, :].expand(bsz, 1, tgt_len, tgt_len + past_key_values_length)
-    
-    ### tiny_mask_size = level_sizes[0] + 1
-    ### mask_cond = torch.arange(tiny_mask_size, device=device)
-    ### hm = mask_cond < (mask_cond + 1).view(tiny_mask_size, 1)
+    if len(level_sizes) > 0:
+        tiny_mask_size = level_sizes[0] + 1
+        mask_cond = torch.arange(tiny_mask_size, device=device)
+        hm = mask_cond < (mask_cond + 1).view(tiny_mask_size, 1)
 
     if guess is not None:
         mask[:,0] = 0
@@ -74,16 +67,12 @@ def j_make_causal_mask_multilevel(
                 mask[-lguess:,-lguess:] = mask[-lguess:,-lguess:].diagonal_scatter(small_m, -1 - i)
             #assert False 
 
-    ### else:
-    ###     assert tgt_len == sum(level_sizes) + 1
-
-    ### #print("level: ", level_sizes)
-    ### for ll in range(len(level_sizes)):
-    ###     if ll > 0:
-    ###         assert level_sizes[ll] == tiny_mask_size
-    ###     mask[tiny_mask_size*ll:tiny_mask_size*(ll+1),:tiny_mask_size].masked_fill_(hm, 0)
-    ###     for row in range(1, ll + 1):
-    ###         mask[tiny_mask_size*ll:tiny_mask_size*(ll+1),tiny_mask_size*row:tiny_mask_size*(row+1)].fill_diagonal_(0)
+    for ll in range(len(level_sizes)):
+        if ll > 0:
+            assert level_sizes[ll] == tiny_mask_size
+        mask[tiny_mask_size*ll:tiny_mask_size*(ll+1),:tiny_mask_size].masked_fill_(hm, 0)
+        for row in range(1, ll + 1):
+            mask[tiny_mask_size*ll:tiny_mask_size*(ll+1),tiny_mask_size*row:tiny_mask_size*(row+1)].fill_diagonal_(0)
 
 
     #mask.masked_fill_(, 0)
@@ -331,9 +320,9 @@ def jforward_multilevel(
     #assert attention_mask.all().item(), " Mask Must All Be One "
     assert labels is None, " Inference Mode "
     assert input_ids.size(0) == 1, " single batch only "
-    ### if level is not None:
-    ###     assert level == len(past_tokens) + 1
-    ###     assert guess_size == level - 1
+    if level is not None:
+        assert level == len(past_tokens) + 1
+        assert guess_size == level - 1
     
     if past_key_values is not None:
         past_size = past_key_values[0][0].size(2)
@@ -357,15 +346,15 @@ def jforward_multilevel(
     all_past = []
     ids_list = []
     attn_size = 0
-    ### for ll in range(fill_level + 1):
-    ###     #print("past size: ", len(past_tokens[ll]))
-    ###     all_past += past_tokens[ll]
-    ###     attn_size += len(past_tokens[ll])
-    ###     level_sizes.append(len(past_tokens[ll]))
-    ###     if ll == 0:
-    ###         ids_list += list(range(lst_id + 1, lst_id + 1 + len(past_tokens[ll])))
-    ###     else:
-    ###         ids_list += list(range(lst_id + ll, lst_id + ll + len(past_tokens[ll])))
+    for ll in range(fill_level + 1):
+        #print("past size: ", len(past_tokens[ll]))
+        all_past += past_tokens[ll]
+        attn_size += len(past_tokens[ll])
+        level_sizes.append(len(past_tokens[ll]))
+        if ll == 0:
+            ids_list += list(range(lst_id + 1, lst_id + 1 + len(past_tokens[ll])))
+        else:
+            ids_list += list(range(lst_id + ll, lst_id + ll + len(past_tokens[ll])))
 
     if guess_tokens is not None:
         input_ids = torch.cat((input_ids, torch.tensor(all_past + guess_tokens, device=input_ids.device, dtype=input_ids.dtype).unsqueeze(0)), dim=1)
@@ -449,13 +438,13 @@ def jforward_multilevel(
         lguess = 0
     
     ret.out_logits = ret.logits[:,prefill_size - 1,:].to(input_ids.device)
-    assert fill_level != -1
+    # assert fill_level != -1
     if lguess > 0:
-        ### ret.inp_logits = ret.logits[:,-len(past_tokens[fill_level])-lguess:-lguess,:].to(input_ids.device)
+        if fill_level != -1:
+            ret.inp_logits = ret.logits[:,-len(past_tokens[fill_level])-lguess:-lguess,:].to(input_ids.device)
         ret.guess_logits = ret.logits[:,-lguess:,:].to(input_ids.device)
-    else:
-        ### ret.inp_logits = ret.logits[:,-len(past_tokens[fill_level]):,:].to(input_ids.device)
-        pass
+    elif fill_level != -1:
+        ret.inp_logits = ret.logits[:,-len(past_tokens[fill_level]):,:].to(input_ids.device)
 
     return ret
 

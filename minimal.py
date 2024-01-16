@@ -10,7 +10,7 @@ if int(os.environ.get("LOAD_LADE", 0)):
 if int(os.environ.get("LOAD_TRIEDE", 0)):
     import triede
     triede.augment_all()
-    triede.config_lade(LEVEL=7, WINDOW_SIZE=20, GUESS_SET_SIZE=20, DEBUG=1)
+    triede.config_triede(PREFIX_LEN=1, GUESS_SET_SIZE=20, DEBUG=1)
 
 assert torch.cuda.is_available()
 

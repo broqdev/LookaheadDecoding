@@ -19,6 +19,7 @@ from fastchat.model import get_conversation_template
 from fastchat.utils import str_to_torch_dtype
 import time
 import lade
+import triede
 
 def run_eval(
     model_path,
@@ -479,6 +480,11 @@ if __name__ == "__main__":
         default=3,
     )
     parser.add_argument(
+        "--prefix-len",
+        type=int,
+        default=1,
+    )
+    parser.add_argument(
         "--window",
         type=int,
         default=10,
@@ -510,6 +516,10 @@ if __name__ == "__main__":
         lade.augment_all()
         lade.config_lade(LEVEL=args.level, WINDOW_SIZE=args.window, GUESS_SET_SIZE=args.guess, DEBUG=1, USE_FLASH=args.use_flash, DIST_WORKERS=len(os.environ.get("CUDA_VISIBLE_DEVICES").split(",")))
         print("lade activated config: ",  lade.decoding.CONFIG_MAP)
+    if int(os.environ.get("USE_TRIEDE", 0)):
+        triede.augment_all()
+        triede.config_triede(PREFIX_LEN=args.prefix_len, GUESS_SIZE=args.level-1, GUESS_SET_SIZE=args.guess, DEBUG=1, USE_FLASH=args.use_flash, DIST_WORKERS=len(os.environ.get("CUDA_VISIBLE_DEVICES").split(",")))
+        print("triede activated config: ",  triede.decoding.CONFIG_MAP)
 
     question_file = f"mtbench.jsonl"
     if args.answer_file:
